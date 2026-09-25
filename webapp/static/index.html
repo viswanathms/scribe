@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SCRIBE</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>SCRIBE</h1>
+    <p class="subtitle">Scientific Corpus Retrieval &amp; Insight Briefing Engine — cs.AI papers, ranked by Claude on growth impact for an AI-driven org</p>
+    <div id="stats" class="stats"></div>
+  </header>
+
+  <div class="controls">
+    <label>
+      Sort by
+      <select id="sortBy">
+        <option value="importance_score">Importance</option>
+        <option value="published_date">Date published</option>
+        <option value="title">Title</option>
+      </select>
+    </label>
+    <label>
+      Order
+      <select id="order">
+        <option value="desc">Descending</option>
+        <option value="asc">Ascending</option>
+      </select>
+    </label>
+    <label>
+      Date
+      <input type="date" id="dateFilter">
+    </label>
+    <label>
+      Min score
+      <select id="minScore">
+        <option value="">Any</option>
+        <option value="9">9+</option>
+        <option value="7">7+</option>
+        <option value="5">5+</option>
+        <option value="3">3+</option>
+      </select>
+    </label>
+    <button id="clearFilters">Clear filters</button>
+  </div>
+
+  <main id="results">
+    <p class="loading">Loading papers…</p>
+  </main>
+
+  <template id="paperCardTemplate">
+    <article class="paper-card">
+      <div class="paper-score" data-role="score"></div>
+      <div class="paper-body">
+        <h2 class="paper-title"><a data-role="abs-link" target="_blank" rel="noopener"></a></h2>
+        <div class="paper-meta">
+          <span data-role="date"></span>
+          <span class="dot">·</span>
+          <span data-role="authors"></span>
+          <span class="dot">·</span>
+          <a data-role="pdf-link" target="_blank" rel="noopener">PDF</a>
+        </div>
+        <div class="paper-tags" data-role="tags"></div>
+        <p class="paper-impact" data-role="impact"></p>
+        <details>
+          <summary>Abstract & Claude's reasoning</summary>
+          <p class="paper-abstract" data-role="abstract"></p>
+          <p class="paper-reasoning" data-role="reasoning"></p>
+        </details>
+      </div>
+    </article>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
