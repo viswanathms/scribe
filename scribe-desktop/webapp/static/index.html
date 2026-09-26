@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SCRIBE</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ===================== Onboarding / Settings wizard ===================== -->
+  <section id="wizard" class="wizard hidden">
+    <div class="wizard-card">
+      <h1>SCRIBE</h1>
+      <p class="subtitle">Scientific Corpus Retrieval &amp; Insight Briefing Engine</p>
+
+      <nav class="wizard-tabs">
+        <button data-step="1" class="wizard-tab active">1. Provider</button>
+        <button data-step="2" class="wizard-tab">2. Extract</button>
+        <button data-step="3" class="wizard-tab">3. Criteria</button>
+      </nav>
+
+      <!-- Step 1: Provider & Auth -->
+      <div class="wizard-step" data-step="1">
+        <label>Provider
+          <select id="provider">
+            <option value="anthropic">Anthropic</option>
+            <option value="openai">OpenAI</option>
+            <option value="ollama">Ollama (local)</option>
+          </select>
+        </label>
+        <label>Base URL
+          <input type="text" id="baseUrl" placeholder="https://api.anthropic.com">
+        </label>
+        <label id="apiKeyLabel">API key
+          <input type="password" id="apiKey" placeholder="sk-...">
+        </label>
+        <label>Model
+          <input type="text" id="model" list="modelSuggestions" placeholder="claude-sonnet-5">
+          <datalist id="modelSuggestions"></datalist>
+        </label>
+        <div class="wizard-actions">
+          <button id="testConnectionBtn">Test connection</button>
+          <span id="testConnectionResult" class="test-result"></span>
+        </div>
+        <div class="wizard-nav">
+          <button id="step1Next" class="primary" disabled>Next</button>
+        </div>
+      </div>
+
+      <!-- Step 2: Extract -->
+      <div class="wizard-step hidden" data-step="2">
+        <label>arXiv category
+          <input type="text" id="category" placeholder="cs.AI">
+        </label>
+        <label>Days back
+          <input type="number" id="daysBack" value="30" min="1" max="365">
+        </label>
+        <div class="wizard-actions">
+          <button id="extractBtn">Extract papers</button>
+        </div>
+        <div id="jobProgress" class="job-progress hidden">
+          <div class="job-progress-bar"><div id="jobProgressFill" class="job-progress-fill"></div></div>
+          <p id="jobProgressDetail" class="job-progress-detail"></p>
+        </div>
+        <div class="wizard-nav">
+          <button id="step2Back">Back</button>
+          <button id="step2Next" class="primary" disabled>Next</button>
+        </div>
+      </div>
+
+      <!-- Step 3: Criteria -->
+      <div class="wizard-step hidden" data-step="3">
+        <label>Type
+          <input type="text" id="critType" list="typeSuggestions" placeholder="AI Engineering">
+          <datalist id="typeSuggestions"></datalist>
+        </label>
+        <label>Function
+          <input type="text" id="critFunction" list="functionSuggestions" placeholder="Engineering">
+          <datalist id="functionSuggestions"></datalist>
+        </label>
+        <label>Area
+          <textarea id="critArea" rows="2" placeholder="e.g. Agent orchestration and multi-agent systems"></textarea>
+        </label>
+        <label>Other conditions
+          <textarea id="critOther" rows="2" placeholder="e.g. Prefer papers with reproducible code"></textarea>
+        </label>
+        <div class="wizard-actions">
+          <button id="saveAndReviewBtn" class="primary">Save &amp; review papers</button>
+        </div>
+        <div id="reviewProgress" class="job-progress hidden">
+          <div class="job-progress-bar"><div id="reviewProgressFill" class="job-progress-fill"></div></div>
+          <p id="reviewProgressDetail" class="job-progress-detail"></p>
+        </div>
+        <div class="wizard-nav">
+          <button id="step3Back">Back</button>
+          <button id="finishBtn" class="primary hidden">View papers</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== Main paper list ===================== -->
+  <section id="mainView" class="hidden">
+    <header>
+      <div class="header-row">
+        <div>
+          <h1>SCRIBE</h1>
+          <p class="subtitle">cs.AI papers, ranked against your saved criteria</p>
+        </div>
+        <button id="settingsBtn" class="icon-btn" title="Settings">&#9881;</button>
+      </div>
+      <div id="stats" class="stats"></div>
+    </header>
+
+    <nav class="main-tabs">
+      <button data-tab="papers" class="main-tab active">Papers</button>
+      <button data-tab="report" class="main-tab">Daily Report</button>
+      <button data-tab="subject" class="main-tab">By Subject</button>
+      <button data-tab="calendar" class="main-tab">Calendar</button>
+    </nav>
+
+    <!-- ---- Papers tab ---- -->
+    <div id="tab-papers" class="tab-panel">
+      <div class="controls">
+        <label>
+          Sort by
+          <select id="sortBy">
+            <option value="importance_score">Importance</option>
+            <option value="published_date">Date published</option>
+            <option value="title">Title</option>
+          </select>
+        </label>
+        <label>
+          Order
+          <select id="order">
+            <option value="desc">Descending</option>
+            <option value="asc">Ascending</option>
+          </select>
+        </label>
+        <label>
+          Date
+          <input type="date" id="dateFilter">
+        </label>
+        <label>
+          Min score
+          <select id="minScore">
+            <option value="">Any</option>
+            <option value="9">9+</option>
+            <option value="7">7+</option>
+            <option value="5">5+</option>
+            <option value="3">3+</option>
+          </select>
+        </label>
+        <button id="clearFilters">Clear filters</button>
+        <button id="extractMoreBtn">Extract more</button>
+      </div>
+
+      <main id="results">
+        <p class="loading">Loading papers…</p>
+      </main>
+    </div>
+
+    <!-- ---- Daily Report tab ---- -->
+    <div id="tab-report" class="tab-panel hidden">
+      <div class="controls">
+        <label>
+          Date
+          <input type="date" id="reportDate">
+        </label>
+        <label>
+          Min importance
+          <input type="number" id="reportThreshold" min="1" max="10" step="1">
+        </label>
+        <button id="reportRefreshBtn">Refresh</button>
+      </div>
+      <div id="reportSummary" class="stats"></div>
+      <main id="reportResults">
+        <p class="loading">Loading report…</p>
+      </main>
+    </div>
+
+    <!-- ---- By Subject tab ---- -->
+    <div id="tab-subject" class="tab-panel hidden">
+      <p class="subtitle">Paper count by arXiv's own primary subject category.</p>
+      <div id="subjectChart" class="subject-chart"></div>
+    </div>
+
+    <!-- ---- Calendar tab ---- -->
+    <div id="tab-calendar" class="tab-panel hidden">
+      <div class="controls calendar-controls">
+        <button id="calPrevBtn">&larr; Prev</button>
+        <span id="calMonthLabel" class="cal-month-label"></span>
+        <button id="calNextBtn">Next &rarr;</button>
+      </div>
+      <div class="cal-legend">
+        <span><i class="cal-swatch" data-tier="low"></i> Low (&lt;5 avg)</span>
+        <span><i class="cal-swatch" data-tier="mid"></i> Mid (5-7 avg)</span>
+        <span><i class="cal-swatch" data-tier="high"></i> High (8+ avg)</span>
+      </div>
+      <div id="calGrid" class="cal-grid"></div>
+    </div>
+  </section>
+
+  <template id="paperCardTemplate">
+    <article class="paper-card">
+      <div class="paper-score" data-role="score"></div>
+      <div class="paper-body">
+        <h2 class="paper-title"><a data-role="abs-link" target="_blank" rel="noopener"></a></h2>
+        <div class="paper-meta">
+          <span data-role="date"></span>
+          <span class="dot">·</span>
+          <span data-role="authors"></span>
+          <span class="dot">·</span>
+          <a data-role="pdf-link" target="_blank" rel="noopener">PDF</a>
+        </div>
+        <div class="paper-tags" data-role="tags"></div>
+        <p class="paper-impact" data-role="impact"></p>
+        <details>
+          <summary>Abstract & reasoning</summary>
+          <p class="paper-abstract" data-role="abstract"></p>
+          <p class="paper-reasoning" data-role="reasoning"></p>
+        </details>
+      </div>
+    </article>
+  </template>
+
+  <template id="reportItemTemplate">
+    <li class="report-item">
+      <span class="report-score" data-role="score"></span>
+      <div class="report-body">
+        <a data-role="link" target="_blank" rel="noopener" class="report-title"></a>
+        <p class="report-oneliner" data-role="summary"></p>
+      </div>
+    </li>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
