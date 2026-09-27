@@ -3,4 +3,4 @@ beautifulsoup4>=4.12
 anthropic>=0.40
 openai>=1.50
 flask>=3.0
-pywebview>=5.3
+pywebview>=6.2.1
