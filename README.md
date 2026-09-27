@@ -1,5 +1,8 @@
 # SCRIBE
 
+[![CI](https://github.com/viswanathms/scribe/actions/workflows/ci.yml/badge.svg)](https://github.com/viswanathms/scribe/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **S**cientific **C**orpus **R**etrieval & **I**nsight **B**riefing **E**ngine
 
 Crawls new `cs.AI` papers from arXiv every day, has Claude score each one on
@@ -109,3 +112,20 @@ SQLite DB at `data/scribe.db` (one `papers` table — see `src/db.py`
 for the schema: arxiv id, title, authors, abstract, subjects, dates, plus
 `importance_score` / `importance_reasoning` / `growth_impact` / `review_tags`
 once Claude has reviewed it).
+
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for
+setup, style, and PR guidelines. Please read the
+[Code of Conduct](CODE_OF_CONDUCT.md) before participating.
+
+## Security
+
+Found a vulnerability? Please don't open a public issue — see
+[SECURITY.md](SECURITY.md) for how to report it privately.
+
+## License
+
+MIT — see [LICENSE](LICENSE). `scribe-desktop/` is a separate,
+independently-licensed subproject (also MIT); see its own
+[LICENSE](scribe-desktop/LICENSE).

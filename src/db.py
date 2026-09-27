@@ -93,7 +93,7 @@ def list_papers(sort_by: str = "published_date", order: str = "desc", date: str 
                  min_score: int | None = None, limit: int = 500):
     sort_by = sort_by if sort_by in ("published_date", "importance_score", "crawled_at", "title") else "published_date"
     order = "ASC" if order.lower() == "asc" else "DESC"
-    query = f"SELECT * FROM papers WHERE 1=1"
+    query = "SELECT * FROM papers WHERE 1=1"
     params: list = []
     if date:
         query += " AND published_date = ?"
