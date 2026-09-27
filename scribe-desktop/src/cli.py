@@ -14,11 +14,17 @@ def _setup_logging():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
+def _parse_categories(raw: str | None) -> list[str] | None:
+    if not raw:
+        return None
+    return [c.strip() for c in raw.split(",") if c.strip()]
+
+
 def cmd_backfill(args):
     db.init_db()
     end = dt.date.today() - dt.timedelta(days=1)
     start = end - dt.timedelta(days=args.days - 1)
-    total = pipeline.crawl_range(start, end, category=args.category)
+    total = pipeline.crawl_range(start, end, categories=_parse_categories(args.categories))
     print(f"Crawled {start} .. {end}: {total} papers total.")
     if not args.skip_review:
         reviewed = pipeline.review_all_pending(batch_size=args.review_batch)
@@ -27,7 +33,7 @@ def cmd_backfill(args):
 
 def cmd_crawl_day(args):
     db.init_db()
-    n = pipeline.crawl_day(args.date, category=args.category)
+    n = pipeline.crawl_day(args.date, categories=_parse_categories(args.categories))
     print(f"Crawled {args.date}: {n} papers.")
 
 
@@ -89,14 +95,14 @@ def main():
 
     p = sub.add_parser("backfill", help="Crawl the last N days (default 30) and review them.")
     p.add_argument("--days", type=int, default=30)
-    p.add_argument("--category", default=None)
+    p.add_argument("--categories", default=None, help="Comma-separated, e.g. cs.AI,cs.LG. Defaults to saved settings.")
     p.add_argument("--review-batch", type=int, default=20)
     p.add_argument("--skip-review", action="store_true")
     p.set_defaults(func=cmd_backfill)
 
     p = sub.add_parser("crawl-day", help="Crawl a single YYYY-MM-DD day.")
     p.add_argument("date")
-    p.add_argument("--category", default=None)
+    p.add_argument("--categories", default=None, help="Comma-separated, e.g. cs.AI,cs.LG. Defaults to saved settings.")
     p.set_defaults(func=cmd_crawl_day)
 
     p = sub.add_parser("review-pending", help="Send unreviewed papers to the configured provider.")

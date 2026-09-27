@@ -28,7 +28,9 @@ CREATE TABLE IF NOT EXISTS papers (
     review_model           TEXT,
     review_provider          TEXT,   -- anthropic | openai | ollama
     criteria_snapshot         TEXT,  -- JSON: the Type/Function/Area/Other active at review time
-    summary                   TEXT   -- one-line plain-English "what this paper does"
+    summary                   TEXT,  -- one-line plain-English "what this paper does"
+    interest_marked_at         TEXT, -- non-NULL = user bookmarked this as "read later"
+    interest_read_at            TEXT -- non-NULL = user has since marked it read
 );
 CREATE INDEX IF NOT EXISTS idx_papers_published_date ON papers(published_date);
 CREATE INDEX IF NOT EXISTS idx_papers_importance ON papers(importance_score);
@@ -39,6 +41,8 @@ CREATE INDEX IF NOT EXISTS idx_papers_importance ON papers(importance_score);
 # covers a brand-new DB.
 MIGRATIONS = [
     ("summary", "TEXT"),
+    ("interest_marked_at", "TEXT"),
+    ("interest_read_at", "TEXT"),
 ]
 
 
@@ -132,11 +136,50 @@ def save_summary(conn, arxiv_id: str, summary: str):
 def get_report(date: str, min_score: int):
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT arxiv_id, title, summary, importance_score, abs_url, pdf_url, published_date "
+            "SELECT arxiv_id, title, summary, importance_score, abs_url, pdf_url, published_date, "
+            "primary_subject, interest_marked_at, interest_read_at "
             "FROM papers WHERE published_date = ? AND importance_score >= ? "
             "ORDER BY importance_score DESC, title ASC",
             (date, min_score),
         ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def set_interest(conn, arxiv_id: str, marked: bool):
+    """Toggling the bookmark on clears any prior read state -- re-marking
+    something starts it fresh in the unread list."""
+    if marked:
+        conn.execute(
+            "UPDATE papers SET interest_marked_at = datetime('now'), interest_read_at = NULL WHERE arxiv_id = ?",
+            (arxiv_id,),
+        )
+    else:
+        conn.execute(
+            "UPDATE papers SET interest_marked_at = NULL, interest_read_at = NULL WHERE arxiv_id = ?",
+            (arxiv_id,),
+        )
+
+
+def set_interest_read(conn, arxiv_id: str, read: bool):
+    conn.execute(
+        "UPDATE papers SET interest_read_at = ? WHERE arxiv_id = ?",
+        (dt_now_or_none(read), arxiv_id),
+    )
+
+
+def dt_now_or_none(flag: bool):
+    import datetime as _dt
+
+    return _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S") if flag else None
+
+
+def get_interests(unread_only: bool = True, limit: int = 500):
+    query = "SELECT * FROM papers WHERE interest_marked_at IS NOT NULL"
+    if unread_only:
+        query += " AND interest_read_at IS NULL"
+    query += " ORDER BY interest_marked_at DESC LIMIT ?"
+    with get_conn() as conn:
+        rows = conn.execute(query, (limit,)).fetchall()
         return [dict(r) for r in rows]
 
 
@@ -174,28 +217,45 @@ def get_calendar_data(year: int, month: int):
         ]
 
 
+def _papers_where(date: str | None, min_score: int | None, query_text: str | None):
+    clauses = ["1=1"]
+    params: list = []
+    if date:
+        clauses.append("published_date = ?")
+        params.append(date)
+    if min_score is not None:
+        clauses.append("importance_score >= ?")
+        params.append(min_score)
+    if query_text:
+        clauses.append("(title LIKE ? OR abstract LIKE ? OR summary LIKE ? OR authors LIKE ?)")
+        like = f"%{query_text}%"
+        params.extend([like, like, like, like])
+    return " AND ".join(clauses), params
+
+
 def list_papers(
     sort_by: str = "published_date",
     order: str = "desc",
     date: str | None = None,
     min_score: int | None = None,
-    limit: int = 500,
+    query_text: str | None = None,
+    page: int = 1,
+    page_size: int = 25,
 ):
+    """Server-side paginated + searchable paper listing. Returns (rows, total_count)."""
     sort_by = sort_by if sort_by in ("published_date", "importance_score", "crawled_at", "title") else "published_date"
     order = "ASC" if order.lower() == "asc" else "DESC"
-    query = "SELECT * FROM papers WHERE 1=1"
-    params: list = []
-    if date:
-        query += " AND published_date = ?"
-        params.append(date)
-    if min_score is not None:
-        query += " AND importance_score >= ?"
-        params.append(min_score)
-    query += f" ORDER BY {sort_by} {order} NULLS LAST, published_date DESC LIMIT ?"
-    params.append(limit)
+    where_sql, params = _papers_where(date, min_score, query_text)
+
     with get_conn() as conn:
-        rows = conn.execute(query, params).fetchall()
-        return [dict(r) for r in rows]
+        total = conn.execute(f"SELECT COUNT(*) AS c FROM papers WHERE {where_sql}", params).fetchone()["c"]
+        offset = max(0, (page - 1) * page_size)
+        rows = conn.execute(
+            f"SELECT * FROM papers WHERE {where_sql} "
+            f"ORDER BY {sort_by} {order} NULLS LAST, published_date DESC LIMIT ? OFFSET ?",
+            params + [page_size, offset],
+        ).fetchall()
+        return [dict(r) for r in rows], total
 
 
 def get_date_bounds():

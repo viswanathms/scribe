@@ -11,23 +11,30 @@ from .providers import get_provider
 log = logging.getLogger("scribe")
 
 
-def crawl_day(date: str, category: str | None = None) -> int:
-    category = category or config.load_settings()["category"]
-    papers = crawler.fetch_day(date, category=category)
-    with db.get_conn() as conn:
-        for p in papers:
-            db.upsert_paper(conn, p.as_dict())
-    log.info("crawl_day %s (%s): %d papers", date, category, len(papers))
-    return len(papers)
+def crawl_day(date: str, categories: list[str] | None = None) -> int:
+    """Crawl one day across every tracked category. One request-burst per
+    category (each already paced by the crawler's own crawl-delay), results
+    from all categories land in the same `papers` table -- a paper crawled
+    under more than one category's "new submissions" (rare) is just a no-op
+    upsert the second time, since arxiv_id is the primary key."""
+    categories = categories or config.load_settings()["categories"]
+    total = 0
+    for category in categories:
+        papers = crawler.fetch_day(date, category=category)
+        with db.get_conn() as conn:
+            for p in papers:
+                db.upsert_paper(conn, p.as_dict())
+        log.info("crawl_day %s (%s): %d papers", date, category, len(papers))
+        total += len(papers)
+    return total
 
 
-def crawl_range(start_date: dt.date, end_date: dt.date, category: str | None = None) -> int:
-    """Crawl every day in [start_date, end_date] inclusive. One request-burst per day,
-    naturally paced by the crawler's own crawl-delay enforcement."""
+def crawl_range(start_date: dt.date, end_date: dt.date, categories: list[str] | None = None) -> int:
+    """Crawl every day in [start_date, end_date] inclusive, across every tracked category."""
     total = 0
     day = start_date
     while day <= end_date:
-        total += crawl_day(day.isoformat(), category=category)
+        total += crawl_day(day.isoformat(), categories=categories)
         day += dt.timedelta(days=1)
     return total
 

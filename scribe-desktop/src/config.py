@@ -30,7 +30,7 @@ DEFAULT_SETTINGS = {
     "base_url": None,  # required for ollama; optional override for anthropic/openai
     "api_key": None,  # not used for ollama
     "model": None,
-    "category": DEFAULT_CATEGORY,
+    "categories": [DEFAULT_CATEGORY],  # arXiv categories/fields to track, e.g. ["cs.AI", "cs.LG"]
     "criteria": {
         "type": "",
         "function": "",
@@ -65,6 +65,12 @@ def load_settings() -> dict:
     merged = json.loads(json.dumps(DEFAULT_SETTINGS))
     merged.update(data)
     merged["criteria"] = {**merged_criteria_default(), **(data.get("criteria") or {})}
+    # Migrate the old single "category" string (pre-multi-category) into the list.
+    if "categories" not in data and data.get("category"):
+        merged["categories"] = [data["category"]]
+    merged.pop("category", None)
+    if not merged.get("categories"):
+        merged["categories"] = [DEFAULT_CATEGORY]
     return merged
 
 

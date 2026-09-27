@@ -5,3 +5,4 @@ build/
 dist/
 *.dmg
 .DS_Store
+scheduler/*.log

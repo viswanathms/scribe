@@ -26,7 +26,7 @@ def _set_job(**kwargs):
         _job.update(kwargs)
 
 
-def _run_extract_job(days: int, category: str):
+def _run_extract_job(days: int, categories: list[str]):
     end = dt.date.today() - dt.timedelta(days=1)
     start = end - dt.timedelta(days=days - 1)
     total_days = (end - start).days + 1
@@ -36,7 +36,7 @@ def _run_extract_job(days: int, category: str):
     try:
         while day <= end:
             day_index += 1
-            n = pipeline.crawl_day(day.isoformat(), category=category)
+            n = pipeline.crawl_day(day.isoformat(), categories=categories)
             _set_job(progress=day_index, detail=f"{day.isoformat()}: {n} papers")
             day += dt.timedelta(days=1)
         _set_job(state="done")
@@ -108,13 +108,18 @@ def create_app() -> Flask:
         order = request.args.get("order", "desc")
         date = request.args.get("date") or None
         min_score = request.args.get("min_score", type=int)
-        limit = request.args.get("limit", default=500, type=int)
+        query_text = request.args.get("q") or None
+        page = max(1, request.args.get("page", default=1, type=int))
+        page_size = min(100, max(1, request.args.get("page_size", default=25, type=int)))
 
-        rows = db.list_papers(sort_by=sort_by, order=order, date=date, min_score=min_score, limit=limit)
+        rows, total = db.list_papers(
+            sort_by=sort_by, order=order, date=date, min_score=min_score,
+            query_text=query_text, page=page, page_size=page_size,
+        )
         for r in rows:
             r["review_tags"] = json.loads(r["review_tags"]) if r.get("review_tags") else []
             r["criteria_snapshot"] = json.loads(r["criteria_snapshot"]) if r.get("criteria_snapshot") else None
-        return jsonify(rows)
+        return jsonify({"items": rows, "total": total, "page": page, "page_size": page_size})
 
     @app.get("/api/stats")
     def api_stats():
@@ -130,9 +135,18 @@ def create_app() -> Flask:
     def api_save_settings():
         body = request.get_json(force=True)
         settings = config.load_settings()
-        for key in ("provider", "base_url", "model", "category"):
+        for key in ("provider", "base_url", "model"):
             if key in body:
                 settings[key] = body[key]
+        if "categories" in body:
+            seen: set = set()
+            cats = []
+            for c in body["categories"]:
+                c = c.strip() if isinstance(c, str) else ""
+                if c and c not in seen:
+                    seen.add(c)
+                    cats.append(c)
+            settings["categories"] = cats or settings["categories"]
         if "report_threshold" in body:
             settings["report_threshold"] = int(body["report_threshold"])
         if body.get("api_key"):  # only overwrite if a new one was actually typed
@@ -181,8 +195,8 @@ def create_app() -> Flask:
             return jsonify({"error": "A job is already running."}), 409
         body = request.get_json(force=True) or {}
         days = int(body.get("days", 30))
-        category = body.get("category") or config.load_settings()["category"]
-        thread = threading.Thread(target=_run_extract_job, args=(days, category), daemon=True)
+        categories = body.get("categories") or config.load_settings()["categories"]
+        thread = threading.Thread(target=_run_extract_job, args=(days, categories), daemon=True)
         thread.start()
         return jsonify({"started": True}), 202
 
@@ -240,6 +254,30 @@ def create_app() -> Flask:
         thread = threading.Thread(target=_run_summary_backfill_job, daemon=True)
         thread.start()
         return jsonify({"started": True}), 202
+
+    # --- interests ("read later") ---
+
+    @app.post("/api/papers/<arxiv_id>/interest")
+    def api_set_interest(arxiv_id):
+        body = request.get_json(force=True) or {}
+        with db.get_conn() as conn:
+            db.set_interest(conn, arxiv_id, bool(body.get("marked", True)))
+        return jsonify({"ok": True})
+
+    @app.post("/api/papers/<arxiv_id>/interest-read")
+    def api_set_interest_read(arxiv_id):
+        body = request.get_json(force=True) or {}
+        with db.get_conn() as conn:
+            db.set_interest_read(conn, arxiv_id, bool(body.get("read", True)))
+        return jsonify({"ok": True})
+
+    @app.get("/api/interests")
+    def api_interests():
+        unread_only = request.args.get("unread_only", default="true") != "false"
+        rows = db.get_interests(unread_only=unread_only)
+        for r in rows:
+            r["review_tags"] = json.loads(r["review_tags"]) if r.get("review_tags") else []
+        return jsonify(rows)
 
     return app
 

@@ -11,6 +11,7 @@
   <!-- ===================== Onboarding / Settings wizard ===================== -->
   <section id="wizard" class="wizard hidden">
     <div class="wizard-card">
+      <button id="wizardCloseBtn" class="wizard-close-btn hidden" title="Close settings">&times;</button>
       <h1>SCRIBE</h1>
       <p class="subtitle">Scientific Corpus Retrieval &amp; Insight Briefing Engine</p>
 
@@ -50,8 +51,9 @@
 
       <!-- Step 2: Extract -->
       <div class="wizard-step hidden" data-step="2">
-        <label>arXiv category
-          <input type="text" id="category" placeholder="cs.AI">
+        <label>arXiv categories/fields to track
+          <input type="text" id="categories" placeholder="cs.AI, cs.LG, cs.CL">
+          <span class="field-hint">Comma-separated. Each is crawled and reviewed independently.</span>
         </label>
         <label>Days back
           <input type="number" id="daysBack" value="30" min="1" max="365">
@@ -104,30 +106,43 @@
   <section id="mainView" class="hidden">
     <header>
       <div class="header-row">
-        <div>
-          <h1>SCRIBE</h1>
-          <p class="subtitle">cs.AI papers, ranked against your saved criteria</p>
+        <div class="header-title">
+          <span class="logo-mark" aria-hidden="true"></span>
+          <div>
+            <h1>SCRIBE</h1>
+            <p class="subtitle">cs.AI papers, ranked against your saved criteria</p>
+          </div>
         </div>
-        <button id="settingsBtn" class="icon-btn" title="Settings">&#9881;</button>
+        <div class="header-actions">
+          <div class="global-search">
+            <span class="global-search-icon" aria-hidden="true">&#128269;</span>
+            <input type="search" id="globalSearch" placeholder="Search all papers…" autocomplete="off">
+          </div>
+          <button id="settingsBtn" class="icon-btn" title="Settings">&#9881;</button>
+        </div>
       </div>
       <div id="stats" class="stats"></div>
     </header>
 
     <nav class="main-tabs">
-      <button data-tab="papers" class="main-tab active">Papers</button>
-      <button data-tab="report" class="main-tab">Daily Report</button>
-      <button data-tab="subject" class="main-tab">By Subject</button>
+      <button data-tab="papers" class="main-tab">Papers</button>
+      <button data-tab="report" class="main-tab active">Daily Report</button>
       <button data-tab="calendar" class="main-tab">Calendar</button>
+      <button data-tab="interests" class="main-tab">Interests</button>
     </nav>
 
     <!-- ---- Papers tab ---- -->
-    <div id="tab-papers" class="tab-panel">
+    <div id="tab-papers" class="tab-panel hidden">
       <div class="controls">
+        <label class="search-field">
+          Search
+          <input type="search" id="papersSearch" placeholder="Title, abstract, author…" autocomplete="off">
+        </label>
         <label>
           Sort by
           <select id="sortBy">
+            <option value="published_date" selected>Date published</option>
             <option value="importance_score">Importance</option>
-            <option value="published_date">Date published</option>
             <option value="title">Title</option>
           </select>
         </label>
@@ -159,10 +174,16 @@
       <main id="results">
         <p class="loading">Loading papers…</p>
       </main>
+
+      <div class="pagination">
+        <button id="pagePrevBtn" disabled>&larr; Prev</button>
+        <span id="pageLabel" class="page-label"></span>
+        <button id="pageNextBtn" disabled>Next &rarr;</button>
+      </div>
     </div>
 
     <!-- ---- Daily Report tab ---- -->
-    <div id="tab-report" class="tab-panel hidden">
+    <div id="tab-report" class="tab-panel">
       <div class="controls">
         <label>
           Date
@@ -175,15 +196,17 @@
         <button id="reportRefreshBtn">Refresh</button>
       </div>
       <div id="reportSummary" class="stats"></div>
-      <main id="reportResults">
-        <p class="loading">Loading report…</p>
-      </main>
-    </div>
 
-    <!-- ---- By Subject tab ---- -->
-    <div id="tab-subject" class="tab-panel hidden">
-      <p class="subtitle">Paper count by arXiv's own primary subject category.</p>
-      <div id="subjectChart" class="subject-chart"></div>
+      <div id="reportSubjectPanel" class="report-panel hidden">
+        <p id="reportSubjectLabel" class="subtitle report-subject-label">Subjects covered this day</p>
+        <div id="reportSubjectChart" class="subject-chart report-subject-chart"></div>
+      </div>
+
+      <div class="report-panel">
+        <main id="reportResults">
+          <p class="loading">Loading report…</p>
+        </main>
+      </div>
     </div>
 
     <!-- ---- Calendar tab ---- -->
@@ -199,6 +222,15 @@
         <span><i class="cal-swatch" data-tier="high"></i> High (8+ avg)</span>
       </div>
       <div id="calGrid" class="cal-grid"></div>
+      <p class="subtitle cal-hint">Click a day with papers to open its Daily Report.</p>
+    </div>
+
+    <!-- ---- Interests tab ---- -->
+    <div id="tab-interests" class="tab-panel hidden">
+      <p class="subtitle">Papers you've bookmarked to read later. Mark one read to clear it from this list.</p>
+      <main id="interestsResults">
+        <p class="loading">Loading interests…</p>
+      </main>
     </div>
   </section>
 
@@ -206,7 +238,10 @@
     <article class="paper-card">
       <div class="paper-score" data-role="score"></div>
       <div class="paper-body">
-        <h2 class="paper-title"><a data-role="abs-link" target="_blank" rel="noopener"></a></h2>
+        <div class="title-row">
+          <h2 class="paper-title"><a data-role="abs-link" target="_blank" rel="noopener"></a></h2>
+          <button class="interest-toggle" data-role="interest-toggle" title="Save to Interests">&#9734;</button>
+        </div>
         <div class="paper-meta">
           <span data-role="date"></span>
           <span class="dot">·</span>
@@ -229,8 +264,33 @@
     <li class="report-item">
       <span class="report-score" data-role="score"></span>
       <div class="report-body">
-        <a data-role="link" target="_blank" rel="noopener" class="report-title"></a>
+        <div class="report-title-row">
+          <a data-role="link" target="_blank" rel="noopener" class="report-title"></a>
+          <button class="interest-toggle" data-role="interest-toggle" title="Save to Interests">&#9734;</button>
+        </div>
+        <div class="report-meta-row">
+          <span class="subject-tag" data-role="subject-tag"></span>
+          <a data-role="pdf-link" target="_blank" rel="noopener" class="report-pdf-link">PDF</a>
+        </div>
         <p class="report-oneliner" data-role="summary"></p>
+      </div>
+    </li>
+  </template>
+
+  <template id="interestItemTemplate">
+    <li class="report-item">
+      <span class="report-score" data-role="score"></span>
+      <div class="report-body">
+        <div class="report-title-row">
+          <a data-role="link" target="_blank" rel="noopener" class="report-title"></a>
+        </div>
+        <div class="report-meta-row">
+          <span data-role="date"></span>
+          <span class="subject-tag" data-role="subject-tag"></span>
+          <a data-role="pdf-link" target="_blank" rel="noopener" class="report-pdf-link">PDF</a>
+        </div>
+        <p class="report-oneliner" data-role="summary"></p>
+        <button class="mark-read-btn" data-role="mark-read">Mark as read</button>
       </div>
     </li>
   </template>

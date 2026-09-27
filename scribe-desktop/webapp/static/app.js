@@ -133,15 +133,26 @@ function pollJob(progressEl, fillEl, detailEl, onDone) {
   }, 1000);
 }
 
+function parseCategoriesInput() {
+  const raw = document.getElementById("categories").value || "cs.AI";
+  const seen = new Set();
+  const cats = [];
+  for (const part of raw.split(",")) {
+    const c = part.trim();
+    if (c && !seen.has(c)) { seen.add(c); cats.push(c); }
+  }
+  return cats.length ? cats : ["cs.AI"];
+}
+
 document.getElementById("extractBtn").addEventListener("click", async () => {
-  const category = document.getElementById("category").value || "cs.AI";
+  const categories = parseCategoriesInput();
   const days = parseInt(document.getElementById("daysBack").value, 10) || 30;
   document.getElementById("extractBtn").disabled = true;
 
   await fetch("/api/extract", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ category, days }),
+    body: JSON.stringify({ categories, days }),
   });
 
   pollJob(
@@ -156,11 +167,11 @@ document.getElementById("extractBtn").addEventListener("click", async () => {
 });
 
 document.getElementById("step2Next").addEventListener("click", async () => {
-  const category = document.getElementById("category").value || "cs.AI";
+  const categories = parseCategoriesInput();
   await fetch("/api/settings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ category }),
+    body: JSON.stringify({ categories }),
   });
   await loadCriteriaSuggestions();
   showWizardStep(3);
@@ -213,12 +224,15 @@ document.getElementById("saveAndReviewBtn").addEventListener("click", async () =
   );
 });
 
-document.getElementById("finishBtn").addEventListener("click", () => {
+function closeWizardToMain() {
   wizardEl.classList.add("hidden");
   mainViewEl.classList.remove("hidden");
   loadStats();
-  loadPapers();
-});
+  switchTab("report");
+}
+
+document.getElementById("finishBtn").addEventListener("click", closeWizardToMain);
+document.getElementById("wizardCloseBtn").addEventListener("click", closeWizardToMain);
 
 document.getElementById("settingsBtn").addEventListener("click", async () => {
   await populateWizardFromSettings();
@@ -227,6 +241,7 @@ document.getElementById("settingsBtn").addEventListener("click", async () => {
   showWizardStep(1);
   document.getElementById("step1Next").disabled = false;
   document.getElementById("finishBtn").classList.remove("hidden");
+  document.getElementById("wizardCloseBtn").classList.remove("hidden");
 });
 
 document.getElementById("extractMoreBtn").addEventListener("click", async () => {
@@ -235,6 +250,7 @@ document.getElementById("extractMoreBtn").addEventListener("click", async () => 
   wizardEl.classList.remove("hidden");
   showWizardStep(2);
   document.getElementById("finishBtn").classList.remove("hidden");
+  document.getElementById("wizardCloseBtn").classList.remove("hidden");
 });
 
 async function populateWizardFromSettings() {
@@ -246,7 +262,7 @@ async function populateWizardFromSettings() {
   document.getElementById("apiKey").value = "";
   document.getElementById("apiKey").placeholder = settings.api_key_set ? "•••••••• (saved, leave blank to keep)" : "sk-...";
   document.getElementById("model").value = settings.model || "";
-  document.getElementById("category").value = settings.category || "cs.AI";
+  document.getElementById("categories").value = (settings.categories || ["cs.AI"]).join(", ");
   document.getElementById("critType").value = settings.criteria?.type || "";
   document.getElementById("critFunction").value = settings.criteria?.function || "";
   document.getElementById("critArea").value = settings.criteria?.area || "";
@@ -263,13 +279,45 @@ const sortByEl = document.getElementById("sortBy");
 const orderEl = document.getElementById("order");
 const dateFilterEl = document.getElementById("dateFilter");
 const minScoreEl = document.getElementById("minScore");
+const papersSearchEl = document.getElementById("papersSearch");
+const globalSearchEl = document.getElementById("globalSearch");
 const cardTemplate = document.getElementById("paperCardTemplate");
+
+const PAGE_SIZE = 25;
+let currentPage = 1;
+
+const MAX_VISIBLE_TAGS = 3;
 
 function scoreTier(score) {
   if (score === null || score === undefined) return "low";
   if (score >= 8) return "high";
   if (score >= 5) return "mid";
   return "low";
+}
+
+async function toggleInterest(arxivId, marked) {
+  await fetch(`/api/papers/${encodeURIComponent(arxivId)}/interest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ marked }),
+  });
+}
+
+function wireInterestToggle(btnEl, paper, onChange) {
+  const isMarked = !!paper.interest_marked_at;
+  btnEl.dataset.marked = isMarked ? "true" : "false";
+  btnEl.textContent = isMarked ? "★" : "☆"; // filled / outline star
+  btnEl.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const nowMarked = btnEl.dataset.marked !== "true";
+    btnEl.disabled = true;
+    await toggleInterest(paper.arxiv_id, nowMarked);
+    btnEl.disabled = false;
+    btnEl.dataset.marked = nowMarked ? "true" : "false";
+    btnEl.textContent = nowMarked ? "★" : "☆";
+    if (onChange) onChange(nowMarked);
+  });
 }
 
 function renderPapers(papers) {
@@ -291,13 +339,22 @@ function renderPapers(papers) {
     node.querySelector('[data-role="date"]').textContent = paper.published_date;
     node.querySelector('[data-role="authors"]').textContent = paper.authors;
     node.querySelector('[data-role="pdf-link"]').href = paper.pdf_url;
+    wireInterestToggle(node.querySelector('[data-role="interest-toggle"]'), paper);
 
     const tagsEl = node.querySelector('[data-role="tags"]');
-    (paper.review_tags || []).forEach((tag) => {
+    const tags = paper.review_tags || [];
+    tags.slice(0, MAX_VISIBLE_TAGS).forEach((tag) => {
       const span = document.createElement("span");
       span.textContent = tag;
       tagsEl.appendChild(span);
     });
+    if (tags.length > MAX_VISIBLE_TAGS) {
+      const more = document.createElement("span");
+      more.className = "tag-more";
+      more.textContent = `+${tags.length - MAX_VISIBLE_TAGS}`;
+      more.title = tags.slice(MAX_VISIBLE_TAGS).join(", ");
+      tagsEl.appendChild(more);
+    }
 
     node.querySelector('[data-role="impact"]').textContent = paper.growth_impact || "";
     node.querySelector('[data-role="abstract"]').textContent = paper.abstract;
@@ -317,35 +374,86 @@ async function loadStats() {
 
 async function loadPapers() {
   resultsEl.innerHTML = '<p class="loading">Loading papers…</p>';
-  const params = new URLSearchParams({ sort: sortByEl.value, order: orderEl.value });
+  const params = new URLSearchParams({
+    sort: sortByEl.value,
+    order: orderEl.value,
+    page: currentPage,
+    page_size: PAGE_SIZE,
+  });
   if (dateFilterEl.value) params.set("date", dateFilterEl.value);
   if (minScoreEl.value) params.set("min_score", minScoreEl.value);
+  if (papersSearchEl.value.trim()) params.set("q", papersSearchEl.value.trim());
 
   const res = await fetch(`/api/papers?${params.toString()}`);
-  const papers = await res.json();
-  renderPapers(papers);
+  const data = await res.json();
+  renderPapers(data.items);
+  updatePaginationControls(data.total, data.page, data.page_size);
+}
+
+function updatePaginationControls(total, page, pageSize) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  document.getElementById("pageLabel").textContent = `Page ${page} of ${totalPages} · ${total} paper(s)`;
+  document.getElementById("pagePrevBtn").disabled = page <= 1;
+  document.getElementById("pageNextBtn").disabled = page >= totalPages;
+}
+
+function reloadPapersFromStart() {
+  currentPage = 1;
+  loadPapers();
 }
 
 for (const el of [sortByEl, orderEl, dateFilterEl, minScoreEl]) {
-  el.addEventListener("change", loadPapers);
+  el.addEventListener("change", reloadPapersFromStart);
 }
+
+let papersSearchDebounce;
+papersSearchEl.addEventListener("input", () => {
+  clearTimeout(papersSearchDebounce);
+  papersSearchDebounce = setTimeout(reloadPapersFromStart, 300);
+});
+
 document.getElementById("clearFilters").addEventListener("click", () => {
   dateFilterEl.value = "";
   minScoreEl.value = "";
+  papersSearchEl.value = "";
+  reloadPapersFromStart();
+});
+
+document.getElementById("pagePrevBtn").addEventListener("click", () => {
+  if (currentPage > 1) { currentPage -= 1; loadPapers(); }
+});
+document.getElementById("pageNextBtn").addEventListener("click", () => {
+  currentPage += 1;
   loadPapers();
+});
+
+globalSearchEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    papersSearchEl.value = globalSearchEl.value;
+    switchTab("papers");
+    reloadPapersFromStart();
+  }
 });
 
 // ===================== Main tabs =====================
 
+function switchTab(tabName) {
+  document.querySelectorAll(".main-tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tabName));
+  document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("hidden", p.id !== `tab-${tabName}`));
+  if (tabName === "papers") loadPapers();
+  if (tabName === "report") loadReport();
+  if (tabName === "calendar") loadCalendar();
+  if (tabName === "interests") loadInterests();
+}
+
 document.querySelectorAll(".main-tab").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    document.querySelectorAll(".main-tab").forEach((t) => t.classList.toggle("active", t === tab));
-    document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("hidden", p.id !== `tab-${tab.dataset.tab}`));
-    if (tab.dataset.tab === "report") loadReport();
-    if (tab.dataset.tab === "subject") loadSubjectChart();
-    if (tab.dataset.tab === "calendar") loadCalendar();
-  });
+  tab.addEventListener("click", () => switchTab(tab.dataset.tab));
 });
+
+function openReportForDate(dateStr) {
+  reportDateEl.value = dateStr;
+  switchTab("report");
+}
 
 // ===================== Daily Report =====================
 
@@ -372,6 +480,11 @@ async function loadReport() {
 
   summaryEl.textContent = `${data.papers.length} paper(s) on ${data.date} scoring >= ${data.min_score}`;
 
+  const subjectChartEl = document.getElementById("reportSubjectChart");
+  const subjectRows = computeSubjectCounts(data.papers);
+  renderSubjectBars(subjectChartEl, subjectRows);
+  document.getElementById("reportSubjectPanel").classList.toggle("hidden", subjectRows.length === 0);
+
   resultsEl.innerHTML = "";
   if (data.papers.length === 0) {
     resultsEl.innerHTML = '<p class="empty">Nothing at or above this threshold for this day.</p>';
@@ -386,10 +499,30 @@ async function loadReport() {
     const link = node.querySelector('[data-role="link"]');
     link.textContent = paper.title;
     link.href = paper.abs_url;
+    node.querySelector('[data-role="pdf-link"]').href = paper.pdf_url;
+    const subjectTagEl = node.querySelector('[data-role="subject-tag"]');
+    subjectTagEl.textContent = humanSubject(paper.primary_subject);
+    subjectTagEl.title = subjectCode(paper.primary_subject);
     node.querySelector('[data-role="summary"]').textContent = paper.summary || "(no summary yet -- run the summary backfill)";
+    wireInterestToggle(node.querySelector('[data-role="interest-toggle"]'), paper);
     ul.appendChild(node);
   }
   resultsEl.appendChild(ul);
+}
+
+function humanSubject(subject) {
+  // "Machine Learning (cs.LG)" -> "Machine Learning" -- readable name over the
+  // bare arXiv category code, which means nothing to anyone who hasn't
+  // memorized the taxonomy.
+  if (!subject) return "";
+  const idx = subject.indexOf(" (");
+  return idx === -1 ? subject : subject.slice(0, idx);
+}
+
+function subjectCode(subject) {
+  if (!subject) return "";
+  const match = subject.match(/\(([^)]+)\)/);
+  return match ? match[1] : "";
 }
 
 document.getElementById("reportRefreshBtn").addEventListener("click", async () => {
@@ -401,15 +534,20 @@ document.getElementById("reportRefreshBtn").addEventListener("click", async () =
   loadReport();
 });
 
-// ===================== By Subject =====================
+// ===================== Subject bar chart (reused by the Daily Report) =====================
 
-async function loadSubjectChart() {
-  const chartEl = document.getElementById("subjectChart");
-  chartEl.innerHTML = '<p class="loading">Loading…</p>';
-  const res = await fetch("/api/stats/by-subject?limit=15");
-  const rows = await res.json();
+function computeSubjectCounts(papers) {
+  const counts = new Map();
+  for (const paper of papers) {
+    const label = humanSubject(paper.primary_subject) || "(unknown)";
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  return Array.from(counts, ([subject, count]) => ({ subject, count })).sort((a, b) => b.count - a.count);
+}
+
+function renderSubjectBars(chartEl, rows) {
   if (rows.length === 0) {
-    chartEl.innerHTML = '<p class="empty">No subject data yet.</p>';
+    chartEl.innerHTML = "";
     return;
   }
   const max = Math.max(...rows.map((r) => r.count));
@@ -504,7 +642,9 @@ async function loadCalendar() {
     if (info) {
       const tier = tierFromAvg(info.avg_score);
       if (tier) cell.dataset.tier = tier;
-      cell.title = `${dateStr}: ${info.total} paper(s), avg score ${info.avg_score ?? "n/a"}`;
+      cell.title = `${dateStr}: ${info.total} paper(s), avg score ${info.avg_score ?? "n/a"} -- click for the daily report`;
+      cell.classList.add("clickable");
+      cell.addEventListener("click", () => openReportForDate(dateStr));
     } else {
       cell.title = dateStr;
     }
@@ -530,6 +670,56 @@ document.getElementById("calNextBtn").addEventListener("click", () => {
   loadCalendar();
 });
 
+// ===================== Interests =====================
+
+const interestItemTemplate = document.getElementById("interestItemTemplate");
+
+async function loadInterests() {
+  const resultsEl = document.getElementById("interestsResults");
+  resultsEl.innerHTML = '<p class="loading">Loading interests…</p>';
+
+  const res = await fetch("/api/interests?unread_only=true");
+  const papers = await res.json();
+
+  resultsEl.innerHTML = "";
+  if (papers.length === 0) {
+    resultsEl.innerHTML = '<p class="empty">No unread interests. Click the star on any paper to save it here.</p>';
+    return;
+  }
+  const ul = document.createElement("ul");
+  for (const paper of papers) {
+    const node = interestItemTemplate.content.cloneNode(true);
+    const scoreEl = node.querySelector('[data-role="score"]');
+    scoreEl.textContent = paper.importance_score ?? "–";
+    scoreEl.dataset.tier = scoreTier(paper.importance_score);
+    const link = node.querySelector('[data-role="link"]');
+    link.textContent = paper.title;
+    link.href = paper.abs_url;
+    node.querySelector('[data-role="date"]').textContent = paper.published_date;
+    node.querySelector('[data-role="pdf-link"]').href = paper.pdf_url;
+    const subjectTagEl = node.querySelector('[data-role="subject-tag"]');
+    subjectTagEl.textContent = humanSubject(paper.primary_subject);
+    subjectTagEl.title = subjectCode(paper.primary_subject);
+    node.querySelector('[data-role="summary"]').textContent = paper.summary || "";
+
+    const li = node.querySelector(".report-item");
+    node.querySelector('[data-role="mark-read"]').addEventListener("click", async () => {
+      await fetch(`/api/papers/${encodeURIComponent(paper.arxiv_id)}/interest-read`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ read: true }),
+      });
+      li.remove();
+      if (!resultsEl.querySelector(".report-item")) {
+        resultsEl.innerHTML = '<p class="empty">No unread interests. Click the star on any paper to save it here.</p>';
+      }
+    });
+
+    ul.appendChild(node);
+  }
+  resultsEl.appendChild(ul);
+}
+
 // ===================== Boot =====================
 
 (async function boot() {
@@ -540,7 +730,7 @@ document.getElementById("calNextBtn").addEventListener("click", () => {
     wizardEl.classList.add("hidden");
     mainViewEl.classList.remove("hidden");
     loadStats();
-    loadPapers();
+    switchTab("report");
   } else {
     mainViewEl.classList.add("hidden");
     wizardEl.classList.remove("hidden");

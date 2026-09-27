@@ -38,16 +38,21 @@ Opens SCRIBE in its own native window (no browser). First launch walks you
 through:
 1. **Provider & auth** — Anthropic / OpenAI / Ollama, base URL, API key
    (skipped for Ollama), model. "Test connection" must pass before continuing.
-2. **Extract** — arXiv category (default `cs.AI`) and how many days back to
-   crawl. Runs for real, respecting arXiv's 15s crawl-delay, so this takes a
-   few minutes for a month of history.
+2. **Extract** — arXiv categories/fields to track (comma-separated, e.g.
+   `cs.AI, cs.LG, cs.CL`; default `cs.AI`) and how many days back to crawl.
+   Each category is crawled and reviewed independently -- a paper that's a
+   "new submission" under more than one tracked category (rare) just gets
+   upserted once, no duplicate. Runs for real, respecting arXiv's 15s
+   crawl-delay per category per day, so this takes longer the more
+   categories you track.
 3. **Criteria** — Type / Function / Area / Other conditions. Saving triggers
    the first review pass over everything just extracted, using whichever
    provider you configured.
 
-After that you land on the ranked list. The gear icon reopens the same wizard
-to change provider/keys/criteria/category at any time; "Extract more" jumps
-straight to step 2.
+After that you land on the ranked list. The gear icon (or the **×** in the
+wizard's top-right corner) reopens/closes the same wizard to change
+provider/keys/criteria/categories at any time without having to click
+through every step; "Extract more" jumps straight to step 2.
 
 Prefer a browser tab instead of the native window? `python -m src.cli serve`
 serves the exact same app on `http://127.0.0.1:8788`.
@@ -84,7 +89,8 @@ python -m src.cli serve                     # web UI in a browser tab, port 8788
 ## Data & settings
 
 - `~/Library/Application Support/SCRIBE/config.json` — provider, base URL,
-  API key, model, category, criteria. `chmod 600` (contains a key in
+  API key, model, categories (a list, not a single value), criteria.
+  `chmod 600` (contains a key in
   plaintext — declined Keychain storage in favor of a simple file; see
   project history if that tradeoff needs revisiting).
 - `~/Library/Application Support/SCRIBE/scribe.db` — same `papers` schema as
@@ -132,6 +138,59 @@ Check progress with `venv/bin/python -m src.cli stats` or:
 sqlite3 ~/Library/Application\ Support/SCRIBE/scribe.db \
   "SELECT COUNT(*) FROM papers WHERE importance_score IS NOT NULL AND summary IS NULL;"
 ```
+
+### Interests ("read later")
+
+Every paper -- in the Papers list and the Daily Report -- has a star toggle.
+Starring adds it to **Interests**, a 5th tab showing everything you've
+bookmarked and haven't yet marked read. "Mark as read" clears it from that
+list without deleting the bookmark history (`interest_marked_at` /
+`interest_read_at` are separate columns -- unread interests are
+`marked_at IS NOT NULL AND read_at IS NULL`). Re-starring a paper always
+resets it to unread.
+
+### Daily Report extras
+
+The standalone "By Subject" tab is gone -- the subject bar chart now lives
+*inside* the Daily Report, computed client-side from that day's filtered
+papers (not an all-time global count), so it shows what today's shortlist
+actually spans rather than a static all-time distribution. Each report item
+also shows a subject tag (arXiv's `primary_subject`, shortened to its code,
+e.g. `cs.LG`) and a direct PDF link alongside the abstract link.
+
+### Calendar -> Daily Report
+
+Any day cell with data is clickable -- it jumps straight to the Daily
+Report tab with that date pre-filled and the report loaded.
+
+## UI rework: pagination, search, alignment, theme
+
+- **Real pagination** on the Papers tab (`/api/papers` now takes
+  `page`/`page_size` and returns `{items, total, page, page_size}`, a
+  breaking change from the old bare-array response) -- 25/page,
+  server-side `LIMIT`/`OFFSET`, so 3,000+ papers don't all load at once.
+- **Search**: a search box in the Papers tab controls (title/abstract/
+  summary/authors, `LIKE`-based -- fine at this row count, no FTS5 needed),
+  debounced 300ms, resets to page 1 on change. A **global search** box in
+  the header is always visible regardless of tab; pressing Enter switches
+  to Papers and applies the same query there, rather than being a second,
+  separate search surface.
+- **Alignment bug fixed**: the star (bookmark) button on paper cards used
+  to sit as plain inline content inside the `<h2>` title, so on a title
+  long enough to wrap, the star could wrap onto its own orphaned line
+  below the card. Fixed by wrapping the title and star in a flex row
+  (`.title-row`) with the star as a non-wrapping flex item -- confirmed
+  by literally screenshotting a card whose title wraps, in both themes,
+  not just by reasoning about the CSS.
+- **Tag chips capped at 3 + "+N"** instead of wrapping to a second line,
+  so card heights stay consistent down a page instead of some cards
+  being visibly taller than others purely from tag count.
+- **Theme refresh**: wider content column (900px -> 1040px, was leaving a
+  lot of dead space on desktop), subtle card shadows instead of flat
+  borders only, a small logo mark next to the wordmark, refined spacing.
+  Score badge colors (red/orange/gray) were deliberately left alone --
+  they're a separate, previously-flagged accessibility issue (see the
+  Calendar section above) and changing them wasn't part of this ask.
 
 ## Ollama notes
 
